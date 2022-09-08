@@ -39,7 +39,7 @@
     self = [super init];
 	if (self)
 	{
-		_lock = OS_SPINLOCK_INIT;
+		_lock = OS_UNFAIR_LOCK_INIT;
         _searchPending = YES;
         _context = CGLRetainContext(context);
 		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(handleServerAnnounce:) name:SyphonServerAnnounceNotification object:nil];
@@ -51,58 +51,49 @@
 - (void)dealloc
 {
 	[[NSNotificationCenter defaultCenter] removeObserver:self];
-	[_name release];
-	[_appname release];
-	[_client release];
-	[_lockedClient release];
     if (_context)
     {
         CGLReleaseContext(_context);
     }
-	[super dealloc];
 }
 
 - (NSString *)name
 {
 	NSString *result;
-	OSSpinLockLock(&_lock);
-	result = [[_name retain] autorelease];
-	OSSpinLockUnlock(&_lock);
+	os_unfair_lock_lock(&_lock);
+	result = _name;
+	os_unfair_lock_unlock(&_lock);
 	return result;
 }
 
 - (void)setName:(NSString *)name
 {
-	OSSpinLockLock(&_lock);
-	[name retain];
-	[_name release];
+	os_unfair_lock_lock(&_lock);
 	_name = name;
 	_searchPending = YES;
-	OSSpinLockUnlock(&_lock);
+	os_unfair_lock_unlock(&_lock);
 }
 
 - (NSString *)appName
 {
 	NSString *result;
-	OSSpinLockLock(&_lock);
-	result = [[_appname retain] autorelease];
-	OSSpinLockUnlock(&_lock);
+	os_unfair_lock_lock(&_lock);
+	result = _appname;
+	os_unfair_lock_unlock(&_lock);
 	return result;
 }
 
 - (void)setAppName:(NSString *)app
 {
-	OSSpinLockLock(&_lock);
-	[app retain];
-	[_appname release];
+	os_unfair_lock_lock(&_lock);
 	_appname = app;
 	_searchPending = YES;
-	OSSpinLockUnlock(&_lock);
+	os_unfair_lock_unlock(&_lock);
 }
 
 - (void)lockClient
 {
-	OSSpinLockLock(&_lock);
+	os_unfair_lock_lock(&_lock);
 	if (_lockedClient == nil)
 	{
 		if (_searchPending)
@@ -110,19 +101,18 @@
 			[self setClientFromSearchHavingLock:YES];
 			_searchPending = NO;
 		}
-		_lockedClient = [_client retain];
+		_lockedClient = _client;
 	}
-	OSSpinLockUnlock(&_lock);
+	os_unfair_lock_unlock(&_lock);
 }
 
 - (void)unlockClient
 {
 	SyphonOpenGLClient *doneWith;
-	OSSpinLockLock(&_lock);
+	os_unfair_lock_lock(&_lock);
 	doneWith = _lockedClient;
 	_lockedClient = nil;
-	OSSpinLockUnlock(&_lock);
-	[doneWith release]; // release outside the lock as it may take time
+	os_unfair_lock_unlock(&_lock);
 }
 
 - (SyphonOpenGLClient *)client
@@ -132,13 +122,13 @@
 
 - (void)setClient:(SyphonOpenGLClient *)client havingLock:(BOOL)isLocked
 {
-    SyphonOpenGLClient *newClient = [client retain];
+    SyphonOpenGLClient *newClient = client;
     SyphonOpenGLClient *oldClient;
 	
-	if (!isLocked) OSSpinLockLock(&_lock);
+	if (!isLocked) os_unfair_lock_lock(&_lock);
 	oldClient = _client;
 	_client = newClient;
-	if (!isLocked) OSSpinLockUnlock(&_lock);
+	if (!isLocked) os_unfair_lock_unlock(&_lock);
 	
 	// If we were registered for notifications and no longer require them
 	// remove ourself from the notification center
@@ -156,9 +146,6 @@
 		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(handleServerAnnounce:) name:SyphonServerAnnounceNotification object:nil];
 		[[NSNotificationCenter defaultCenter] removeObserver:self name:SyphonServerRetireNotification object:nil];
 	}
-	
-	// Release the old client
-	[oldClient release];
 }
 
 - (BOOL)parametersMatchDescription:(NSDictionary *)description
@@ -187,7 +174,7 @@
 {
     SyphonOpenGLClient *newClient = nil;
 	
-	if (!isLocked) OSSpinLockLock(&_lock);
+	if (!isLocked) os_unfair_lock_lock(&_lock);
     
     NSArray *matches = [[SyphonServerDirectory sharedDirectory] serversMatchingName:_name appName:_appname];
 
@@ -197,7 +184,7 @@
         NSString *found = [[matches lastObject] objectForKey:SyphonServerDescriptionUUIDKey];
         if (found && [current isEqualToString:found])
         {
-            newClient = [_client retain];
+            newClient = _client;
         }
         else
         {
@@ -206,9 +193,7 @@
     }
 	[self setClient:newClient havingLock:YES];
 	
-    if (!isLocked) OSSpinLockUnlock(&_lock);
-	
-    [newClient release];
+    if (!isLocked) os_unfair_lock_unlock(&_lock);
 }
 
 + (NSDictionary *)serverInfoFromNotification:(NSNotification *)notification
@@ -236,7 +221,6 @@
         SyphonOpenGLClient *newClient = [[SyphonOpenGLClient alloc] initWithServerDescription:newInfo context:_context options:nil newFrameHandler:nil];
 		
 		[self setClient:newClient havingLock:NO];
-		[newClient release];
 	}
 }
 
@@ -261,7 +245,6 @@
         SyphonOpenGLClient *newClient = [[SyphonOpenGLClient alloc] initWithServerDescription:newInfo context:_context options:nil newFrameHandler:nil];
 		
 		[self setClient:newClient havingLock:NO];
-		[newClient release];
 	}
 }
 
