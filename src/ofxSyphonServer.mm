@@ -32,7 +32,7 @@ void ofxSyphonServer::cleanup(){
     }
 }
 
-void ofxSyphonServer::setName(string n)
+void ofxSyphonServer::setName(const std::string &n)
 {
 	NSString *title = [NSString stringWithCString:n.c_str()
 										 encoding:[NSString defaultCStringEncoding]];
